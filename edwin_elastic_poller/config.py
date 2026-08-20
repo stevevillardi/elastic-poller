@@ -9,8 +9,6 @@ from typing import Optional
 
 from dotenv import load_dotenv
 
-load_dotenv()
-
 # Exit codes
 OK = 0
 ERROR_CODE_UNKNOWN = 1
@@ -28,6 +26,39 @@ EDWIN_CREDENTIAL_VARS = (
 
 _bootstrapped = False
 logger = logging.getLogger("edwin_elastic_poller")
+
+# Populated by reload_settings(); defaults keep type checkers and tests happy.
+ELASTIC_USER: Optional[str] = None
+ELASTIC_PASS: Optional[str] = None
+ELASTIC_TOKEN: Optional[str] = None
+ELASTIC_URL: Optional[str] = None
+ELASTIC_BATCH_SIZE = 500
+ELASTIC_INDEX: Optional[str] = None
+ELASTIC_QUERY = "*"
+ELASTIC_PIT_KEEP_ALIVE = "5m"
+VERIFY_SSL = True
+ELASTIC_VERIFY_SSL = True
+EDWIN_VERIFY_SSL = True
+ELASTIC_OVERLAP_MS = 300000
+DEDUPE_MAX_RECORDS = 250000
+DEDUPE_MAX_SIZE_MB = 256
+PAUSE_INTERVAL = "240"
+EDWIN_ORG: Optional[str] = None
+EDWIN_ID: Optional[str] = None
+EDWIN_TOKEN: Optional[str] = None
+DEXDA_ORG: Optional[str] = None
+DEXDA_ID: Optional[str] = None
+DEXDA_TOKEN: Optional[str] = None
+BOOKMARK_PATH: Optional[str] = None
+DEBUG = False
+LOG_ENABLED = True
+LM_LOGS_ENABLED = False
+LM_LOGS_VERBOSE = False
+LM_LOGS_ACCOUNT: Optional[str] = None
+LM_LOGS_BEARER_TOKEN: Optional[str] = None
+LM_LOGS_RESOURCE_ID: Optional[str] = None
+FAILED_PAYLOAD_PATH: Optional[str] = None
+EVENT_MAPPING_FILE: Optional[str] = None
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -87,17 +118,6 @@ def missing_edwin_credential_names() -> list[str]:
     return missing
 
 
-# Elasticsearch
-ELASTIC_USER = os.getenv("ELASTIC_USER")
-ELASTIC_PASS = os.getenv("ELASTIC_PASS")
-ELASTIC_TOKEN = os.getenv("ELASTIC_TOKEN")
-ELASTIC_URL = os.getenv("ELASTIC_URL")
-ELASTIC_BATCH_SIZE = env_int("ELASTIC_BATCH_SIZE", 500)
-ELASTIC_INDEX = os.getenv("ELASTIC_INDEXS")
-ELASTIC_QUERY = os.getenv("ELASTIC_QUERY", "*")
-ELASTIC_PIT_KEEP_ALIVE = os.getenv("ELASTIC_PIT_KEEP_ALIVE", "5m")
-
-
 def resolve_verify_ssl(*legacy_names: str, default: bool = True) -> bool:
     """Return TLS verification for outbound HTTPS clients.
 
@@ -113,11 +133,6 @@ def resolve_verify_ssl(*legacy_names: str, default: bool = True) -> bool:
     return default
 
 
-VERIFY_SSL = resolve_verify_ssl("ELASTIC_VERIFY_SSL", "EDWIN_VERIFY_SSL")
-ELASTIC_VERIFY_SSL = resolve_verify_ssl("ELASTIC_VERIFY_SSL")
-EDWIN_VERIFY_SSL = resolve_verify_ssl("EDWIN_VERIFY_SSL")
-
-
 def suppress_insecure_request_warnings() -> None:
     """Silence urllib3 warnings when TLS verification is disabled."""
     if ELASTIC_VERIFY_SSL and EDWIN_VERIFY_SSL:
@@ -127,38 +142,88 @@ def suppress_insecure_request_warnings() -> None:
     requests.packages.urllib3.disable_warnings(
         requests.packages.urllib3.exceptions.InsecureRequestWarning
     )
-ELASTIC_OVERLAP_MS = env_int("ELASTIC_OVERLAP_MS", 300000)
-DEDUPE_MAX_RECORDS = env_int("DEDUPE_MAX_RECORDS", 250000)
-DEDUPE_MAX_SIZE_MB = env_int("DEDUPE_MAX_SIZE_MB", 256)
 
-# Edwin (EDWIN_* preferred; DEXDA_* env vars kept for compatibility)
-PAUSE_INTERVAL = os.getenv("POLLER_INTERVAL", 240)
-EDWIN_ORG = edwin_org()
-EDWIN_ID = edwin_client_id()
-EDWIN_TOKEN = edwin_client_token()
 
-# Deprecated module-level aliases (prefer EDWIN_* above).
-DEXDA_ORG = EDWIN_ORG
-DEXDA_ID = EDWIN_ID
-DEXDA_TOKEN = EDWIN_TOKEN
+def reload_settings() -> None:
+    """Refresh module-level settings from the current process environment."""
+    global ELASTIC_USER, ELASTIC_PASS, ELASTIC_TOKEN, ELASTIC_URL
+    global ELASTIC_BATCH_SIZE, ELASTIC_INDEX, ELASTIC_QUERY, ELASTIC_PIT_KEEP_ALIVE
+    global VERIFY_SSL, ELASTIC_VERIFY_SSL, EDWIN_VERIFY_SSL
+    global ELASTIC_OVERLAP_MS, DEDUPE_MAX_RECORDS, DEDUPE_MAX_SIZE_MB
+    global PAUSE_INTERVAL, EDWIN_ORG, EDWIN_ID, EDWIN_TOKEN
+    global DEXDA_ORG, DEXDA_ID, DEXDA_TOKEN
+    global BOOKMARK_PATH, DEBUG, LOG_ENABLED
+    global LM_LOGS_ENABLED, LM_LOGS_VERBOSE, LM_LOGS_ACCOUNT
+    global LM_LOGS_BEARER_TOKEN, LM_LOGS_RESOURCE_ID
+    global FAILED_PAYLOAD_PATH, EVENT_MAPPING_FILE
 
-# Poller runtime
-BOOKMARK_PATH = os.getenv("BOOKMARK_PATH")
-DEBUG = env_bool("DEBUG", default=False)
-LOG_ENABLED = env_bool("LOG", default=True)
-
-# Optional LM Logs shipping
-LM_LOGS_ENABLED = env_bool("LM_LOGS_ENABLED", default=False)
-LM_LOGS_VERBOSE = env_bool("LM_LOGS_VERBOSE", default=False)
-LM_LOGS_ACCOUNT = os.getenv("LM_LOGS_ACCOUNT") or edwin_org()
-LM_LOGS_BEARER_TOKEN = os.getenv("LM_LOGS_BEARER_TOKEN")
-LM_LOGS_RESOURCE_ID = os.getenv("LM_LOGS_RESOURCE_ID")
-FAILED_PAYLOAD_PATH = os.getenv("FAILED_PAYLOAD_PATH")
-EVENT_MAPPING_FILE = os.getenv("EVENT_MAPPING_FILE")
+    ELASTIC_USER = os.getenv("ELASTIC_USER")
+    ELASTIC_PASS = os.getenv("ELASTIC_PASS")
+    ELASTIC_TOKEN = os.getenv("ELASTIC_TOKEN")
+    ELASTIC_URL = os.getenv("ELASTIC_URL")
+    ELASTIC_BATCH_SIZE = env_int("ELASTIC_BATCH_SIZE", 500)
+    ELASTIC_INDEX = os.getenv("ELASTIC_INDEXS")
+    ELASTIC_QUERY = os.getenv("ELASTIC_QUERY", "*")
+    ELASTIC_PIT_KEEP_ALIVE = os.getenv("ELASTIC_PIT_KEEP_ALIVE", "5m")
+    VERIFY_SSL = resolve_verify_ssl("ELASTIC_VERIFY_SSL", "EDWIN_VERIFY_SSL")
+    ELASTIC_VERIFY_SSL = resolve_verify_ssl("ELASTIC_VERIFY_SSL")
+    EDWIN_VERIFY_SSL = resolve_verify_ssl("EDWIN_VERIFY_SSL")
+    ELASTIC_OVERLAP_MS = env_int("ELASTIC_OVERLAP_MS", 300000)
+    DEDUPE_MAX_RECORDS = env_int("DEDUPE_MAX_RECORDS", 250000)
+    DEDUPE_MAX_SIZE_MB = env_int("DEDUPE_MAX_SIZE_MB", 256)
+    PAUSE_INTERVAL = os.getenv("POLLER_INTERVAL", 240)
+    EDWIN_ORG = edwin_org()
+    EDWIN_ID = edwin_client_id()
+    EDWIN_TOKEN = edwin_client_token()
+    DEXDA_ORG = EDWIN_ORG
+    DEXDA_ID = EDWIN_ID
+    DEXDA_TOKEN = EDWIN_TOKEN
+    BOOKMARK_PATH = os.getenv("BOOKMARK_PATH")
+    DEBUG = env_bool("DEBUG", default=False)
+    LOG_ENABLED = env_bool("LOG", default=True)
+    LM_LOGS_ENABLED = env_bool("LM_LOGS_ENABLED", default=False)
+    LM_LOGS_VERBOSE = env_bool("LM_LOGS_VERBOSE", default=False)
+    LM_LOGS_ACCOUNT = os.getenv("LM_LOGS_ACCOUNT") or edwin_org()
+    LM_LOGS_BEARER_TOKEN = os.getenv("LM_LOGS_BEARER_TOKEN")
+    LM_LOGS_RESOURCE_ID = os.getenv("LM_LOGS_RESOURCE_ID")
+    FAILED_PAYLOAD_PATH = os.getenv("FAILED_PAYLOAD_PATH")
+    EVENT_MAPPING_FILE = os.getenv("EVENT_MAPPING_FILE")
 
 
 class ConfigurationError(ValueError):
     """Raised when required runtime configuration is invalid."""
+
+
+def load_environment(
+    *,
+    env_file: str | None = None,
+    mapping_file: str | None = None,
+) -> None:
+    """Load dotenv files and refresh module settings.
+
+    When ``env_file`` is set, only that file is loaded. Otherwise python-dotenv
+    searches for ``.env`` from the current working directory upward.
+    ``mapping_file`` sets ``EVENT_MAPPING_FILE`` after env loading.
+    """
+    if env_file:
+        path = Path(env_file).expanduser()
+        if not path.is_file():
+            raise ConfigurationError(
+                f"Env file does not exist or is not a file: {env_file}"
+            )
+        load_dotenv(path, override=True)
+    else:
+        load_dotenv()
+
+    if mapping_file:
+        path = Path(mapping_file).expanduser()
+        if not path.is_file():
+            raise ConfigurationError(
+                f"Mapping file does not exist or is not a file: {mapping_file}"
+            )
+        os.environ["EVENT_MAPPING_FILE"] = str(path)
+
+    reload_settings()
 
 
 def validate_config() -> None:
@@ -225,3 +290,6 @@ def bootstrap() -> None:
         lm_logs_verbose=LM_LOGS_VERBOSE,
     )
     _bootstrapped = True
+
+
+load_environment()

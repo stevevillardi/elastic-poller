@@ -24,9 +24,7 @@ from tests import es_test_support, patch_target, storage_patches
 
 ES_TEST_URL = es_test_support.DEFAULT_ES_URL
 
-requires_es = unittest.skipUnless(
-    ES_TEST_URL, "ES_TEST_URL not set; skipping Elasticsearch integration tests"
-)
+requires_es = es_test_support.skip_unless_integration(ES_TEST_URL)
 
 PAGE_SIZE = 5
 DOCS_PER_BATCH = 20

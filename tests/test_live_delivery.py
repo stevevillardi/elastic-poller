@@ -32,9 +32,7 @@ from tests import es_test_support, patch_target, storage_patches
 ES_TEST_URL = es_test_support.DEFAULT_ES_URL
 LIVE_CREDENTIALS = config.has_edwin_credentials()
 
-requires_es = unittest.skipUnless(
-    ES_TEST_URL, "ES_TEST_URL not set; skipping live delivery tests"
-)
+requires_es = es_test_support.skip_unless_integration(ES_TEST_URL)
 requires_live = unittest.skipUnless(
     LIVE_CREDENTIALS and lm_logs.env_bool("ES_LIVE_DELIVERY"),
     "Set EDWIN_* (or DEXDA_*), and ES_LIVE_DELIVERY=1 for live tests",

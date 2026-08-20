@@ -35,12 +35,14 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install edwin-elastic-poller
 
-cp .env.example .env
-# edit .env with your credentials
+sudo mkdir -p /etc/edwin-elastic-poller /var/lib/edwin-elastic-poller
+# copy and edit the example env from the GitHub repo into /etc/edwin-elastic-poller/env
 
-edwin-elastic-poller
-# or: python -m edwin_elastic_poller
+edwin-elastic-poller --env-file /etc/edwin-elastic-poller/env
+# or: python -m edwin_elastic_poller --env-file /etc/edwin-elastic-poller/env
 ```
+
+When `--env-file` is omitted, the poller searches for `.env` from the current working directory upward (convenient for local development).
 
 Pre-releases are published to [TestPyPI](https://test.pypi.org/project/edwin-elastic-poller/) first. To try a candidate build:
 
@@ -116,7 +118,26 @@ Dependencies are declared in `pyproject.toml` only. Run from the repository root
 
 ## Configuration
 
-All settings are loaded from environment variables (or a `.env` file in the working directory).
+All settings are loaded from environment variables. For packaged installs, pass an explicit env file with `--env-file`. Without that flag, a `.env` file in the working directory (or a parent directory) is loaded automatically.
+
+### Command-line options
+
+| Option | Description |
+|--------|-------------|
+| `--env-file PATH` | Load settings from `PATH` instead of searching for `.env` |
+| `--mapping-file PATH` | Use a custom CEF mapping YAML (overrides `EVENT_MAPPING_FILE`) |
+
+Example production layout:
+
+```bash
+edwin-elastic-poller \
+  --env-file /etc/edwin-elastic-poller/env \
+  --mapping-file /etc/edwin-elastic-poller/mapping.yaml
+```
+
+Set `BOOKMARK_PATH=/var/lib/edwin-elastic-poller` in the env file so bookmark and dedupe state persist outside `/etc`.
+
+Shell environment variables override values from an auto-discovered `.env` file. Values from `--env-file` override the existing process environment for keys defined in that file.
 
 ### Edwin credentials
 
@@ -214,6 +235,7 @@ Documents are converted to CEF using the bundled mapping file at `edwin_elastic_
 
 To customize mapping for your environment, either:
 
+- Pass `--mapping-file /path/to/mapping.yaml` on the command line,
 - Set `EVENT_MAPPING_FILE` to the path of your YAML file (absolute or relative to the process working directory), or
 - Edit the bundled file in a development checkout and restart the integration.
 

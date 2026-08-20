@@ -37,9 +37,7 @@ from tests import es_test_support, patch_target, storage_patches
 
 ES_TEST_URL = (os.getenv("ES_TEST_URL") or "").rstrip("/")
 
-requires_es = unittest.skipUnless(
-    ES_TEST_URL, "ES_TEST_URL not set; skipping Elasticsearch integration tests"
-)
+requires_es = es_test_support.skip_unless_integration(ES_TEST_URL)
 
 INDEX = f"poller-it-{uuid.uuid4().hex[:8]}"
 

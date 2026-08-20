@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "edwin-elastic-poller"
-version = "0.1.0"
+version = "0.2.0rc1"
 description = "Poll Elasticsearch Kibana event logs and deliver them to Edwin"
 readme = "README.md"
 license = { text = "MIT" }

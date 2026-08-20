@@ -6,13 +6,18 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
-from edwin_elastic_poller import bookmark, config, elasticsearch, poller
+from edwin_elastic_poller import bookmark, cli, config, elasticsearch, poller
 from edwin_elastic_poller import storage_paths
 from edwin_elastic_poller.observability import lm_logs
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     try:
+        args = cli.parse_args(argv)
+        config.load_environment(
+            env_file=args.env_file,
+            mapping_file=args.mapping_file,
+        )
         config.bootstrap()
         config.validate_config()
         poller.log_startup()

@@ -179,11 +179,30 @@ ES_LIVE_DELIVERY=1 python scripts/local_e2e.py --es-url http://localhost:9200 --
 
 Run from the **repository root** or install the package with `pip install -e .`.
 
-```bash
-# All tests. Integration modules skip themselves when ES_TEST_URL is unset.
-python -m unittest discover -s tests -t . -p "test_*.py" -v
+### Unit tests only (no Elasticsearch required)
 
-# Integration tests against a running Elasticsearch (see above).
+```bash
+python scripts/run_unit_tests.py
+```
+
+This runs bookmark, query, mapping, env-config, LM Logs, and CLI tests. Integration and live-delivery modules are excluded.
+
+### All tests (integration modules auto-skip when ES is unavailable)
+
+```bash
+python -m unittest discover -s tests -t . -p "test_*.py" -v
+```
+
+Integration tests run only when `ES_TEST_URL` is set **and** Elasticsearch responds. If you have `ES_TEST_URL` exported but Elasticsearch is stopped, those modules skip instead of hanging on connection errors. Unset `ES_TEST_URL` to skip them immediately:
+
+```bash
+unset ES_TEST_URL
+python -m unittest discover -s tests -t . -p "test_*.py" -v
+```
+
+### Integration tests against a running Elasticsearch
+
+```bash
 ES_TEST_URL=http://localhost:9200 ES_REQUIRE_INTEGRATION=1 \
   python -m unittest discover -s tests -t . -p "test_integration_*.py" -v
 ```

@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import unittest
 from datetime import datetime, timedelta, timezone
 from typing import Iterable, List, Optional, Sequence, Tuple
 
@@ -13,6 +14,38 @@ import requests
 DocPair = Tuple[str, dict]
 
 DEFAULT_ES_URL = (os.getenv("ES_TEST_URL") or "").rstrip("/")
+
+
+def es_is_reachable(es_url: str, *, timeout: float = 2.0) -> bool:
+    """Return True when Elasticsearch responds at *es_url*."""
+    if not es_url:
+        return False
+    try:
+        response = requests.get(f"{es_url.rstrip('/')}/", timeout=timeout)
+        return response.status_code < 500
+    except requests.RequestException:
+        return False
+
+
+def integration_skip_reason(es_url: str | None = None) -> str | None:
+    """Explain why integration tests should be skipped, or None to run them."""
+    url = (es_url or DEFAULT_ES_URL or "").rstrip("/")
+    if not url:
+        return "ES_TEST_URL not set; skipping Elasticsearch integration tests"
+    if os.getenv("ES_REQUIRE_INTEGRATION"):
+        return None
+    if not es_is_reachable(url):
+        return (
+            f"Elasticsearch not reachable at {url}; skipping integration tests "
+            "(start Elasticsearch or unset ES_TEST_URL)"
+        )
+    return None
+
+
+def skip_unless_integration(es_url: str | None = None):
+    """Return a unittest skip decorator for integration/live ES tests."""
+    reason = integration_skip_reason(es_url)
+    return unittest.skipIf(reason is not None, reason or "")
 
 
 def integration_doc(

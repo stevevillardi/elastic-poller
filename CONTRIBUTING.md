@@ -47,14 +47,14 @@ Publishing is automated by [`.github/workflows/publish.yml`](.github/workflows/p
 
 | Release type | Destination |
 |--------------|-------------|
-| **Pre-release** | [TestPyPI](https://test.pypi.org/) (`TESTPYPI_API_TOKEN`) |
-| **Full release** | [PyPI](https://pypi.org/) (`PYPI_API_TOKEN`) |
+| **Pre-release** | [TestPyPI](https://test.pypi.org/project/edwin-elastic-poller/) |
+| **Full release** | [PyPI](https://pypi.org/project/edwin-elastic-poller/) |
 
 The workflow verifies that the release tag matches `pyproject.toml` before uploading.
 
-To publish manually from the Actions tab, run **Publish** with `workflow_dispatch` and choose `testpypi` or `pypi`.
+To publish manually from the Actions tab, run **Publish to PyPI** with `workflow_dispatch` and choose `testpypi` or `pypi`.
 
-Configure GitHub environments `testpypi` and `pypi` with the API tokens as secrets. Optional: enable [PyPI trusted publishing](https://docs.pypi.org/trusted-publishers/) and remove the token secrets later.
+Publishing uses [PyPI trusted publishing](https://docs.pypi.org/trusted-publishers/) (OpenID Connect) via `pypa/gh-action-pypi-publish`. Configure trusted publishers on TestPyPI and PyPI for this repository, then create GitHub environments named `testpypi` and `pypi` (no API token secrets required).
 
 ## Supported versions
 

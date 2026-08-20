@@ -6,8 +6,9 @@ import logging
 import time
 from typing import Any, Dict, List, Tuple
 
-import lm_logs
-from elastic_poller import bookmark, config, dedupe, delivery, elasticsearch
+from edwin_elastic_poller import bookmark, config, dedupe, delivery, elasticsearch
+from edwin_elastic_poller import storage_paths
+from edwin_elastic_poller.observability import lm_logs
 
 
 def process_hits(
@@ -24,31 +25,9 @@ def process_hits(
     last_timestamp_ms = query_bookmark
 
     for hit in hits:
-        event = delivery.create_event(hit)
-        event.set_enrichment_value("lm_bookmark", query_bookmark)
-        event.set_enrichment_value("lm_watermark", watermark)
-        event.set_enrichment_value("lm_loaded", bookmark_loaded)
-        event.set_enrichment_value("lm_elastic_index", config.ELASTIC_INDEX)
-
-        try:
-            space_ids = hit["_source"].get("kibana", {}).get("space_ids", [])
-            if space_ids:
-                event.set_enrichment_value("lm_service_id", ",".join(space_ids))
-        except (TypeError, AttributeError):
-            pass
-
-        cef = event.get_cef()
-        cef["cef"]["event_source_id"] = cef["cef"]["source_record"]["_id"]
-
-        if "," in cef["cef"]["event_ci"]:
-            ci = cef["cef"]["event_ci"]
-            cef["cef"]["event_ci"] = ci.split(",")[0]
-            try:
-                if cef["cef"]["source_record"]["_source"]["event"].get("end"):
-                    cef["cef"]["event_severity"] = 0
-            except (TypeError, NameError) as exc:
-                config.logger.debug("Could not evaluate event.end for severity: %s", exc)
-
+        cef = delivery.map_hit_to_cef(
+            hit, query_bookmark, watermark, bookmark_loaded
+        )
         event_list.append(cef)
         last_timestamp_ms = elasticsearch.hit_timestamp_ms(hit)
         config.logger.debug(
@@ -264,13 +243,6 @@ def poll_cycle(bookmark_ms: int, watermark: int, bookmark_loaded: bool) -> int:
     return updated_bookmark
 
 
-def read_elastic_records() -> str:
-    """Load fixture data for local testing (output_500.json)."""
-    config.logger.info("Loading records from output_500.json")
-    with open("output_500.json", "r") as fh:
-        return fh.read()
-
-
 def log_startup() -> None:
     """Emit a sanitized configuration snapshot at startup."""
     context = lm_logs.build_startup_context(
@@ -279,10 +251,10 @@ def log_startup() -> None:
         elastic_index=config.ELASTIC_INDEX,
         elastic_query=config.ELASTIC_QUERY,
         elastic_batch_size=config.ELASTIC_BATCH_SIZE,
-        elastic_verify_ssl=config.ELASTIC_VERIFY_SSL,
+        verify_ssl=config.ELASTIC_VERIFY_SSL,
         elastic_pit_keep_alive=config.ELASTIC_PIT_KEEP_ALIVE,
         poller_interval=str(config.PAUSE_INTERVAL),
-        bookmark_path=bookmark.bookmark_file,
+        bookmark_path=storage_paths.bookmark_file(),
         lm_logs_enabled=config.LM_LOGS_ENABLED,
         elastic_overlap_ms=config.ELASTIC_OVERLAP_MS,
     )
@@ -290,6 +262,3 @@ def log_startup() -> None:
     lm_logs.log_with_context(
         config.logger, lm_logs.operational_log_level(), context["msg"], **metadata
     )
-
-
-readElasticRecords = read_elastic_records

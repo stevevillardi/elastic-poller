@@ -1,4 +1,4 @@
-# Contributing to elastic-poller
+# Contributing to edwin-elastic-poller
 
 This guide covers development setup, testing, and implementation details for maintainers.
 
@@ -6,17 +6,18 @@ This guide covers development setup, testing, and implementation details for mai
 
 | Path | Purpose |
 |------|---------|
-| `elastic_poller/` | Python package: config, bookmark, ES client, delivery, poll loop (`python -m elastic_poller`) |
-| `elastic_poller/config.py` | Environment loading, `EDWIN_*` / `DEXDA_*` aliases, logging setup |
-| `elastic_poller/bookmark.py` | Bookmark read/write |
-| `elastic_poller/elasticsearch.py` | ES transport, PIT, query builder |
-| `elastic_poller/delivery.py` | CEF event creation and Edwin delivery |
-| `elastic_poller/poller.py` | `poll_cycle`, hit processing |
-| `lm_logs.py` | Optional LogicMonitor Logs ingestion handler |
-| `edwin_request.py` | HTTP client for Edwin OAuth and event ingestion |
-| `common_event.py` | Maps raw records to Common Event Format (CEF) |
-| `elastic_event_mappings.yaml` | JSONPath mappings from ES documents to CEF fields |
-| `tests/test_elastic_poller.py` | Unit tests for bookmark, query, pagination, and mapping |
+| `edwin_elastic_poller/` | Python package: config, bookmark, ES client, delivery, poll loop (`python -m edwin_elastic_poller`) |
+| `edwin_elastic_poller/config.py` | Environment loading, `EDWIN_*` / `DEXDA_*` aliases, logging bootstrap |
+| `edwin_elastic_poller/storage_paths.py` | Bookmark and dedupe file path resolution |
+| `edwin_elastic_poller/bookmark.py` | Bookmark read/write |
+| `edwin_elastic_poller/elasticsearch.py` | ES transport, PIT, query builder |
+| `edwin_elastic_poller/delivery.py` | CEF event creation and Edwin delivery |
+| `edwin_elastic_poller/poller.py` | `poll_cycle`, operational summaries |
+| `edwin_elastic_poller/sdk/common_event.py` | Maps raw records to Common Event Format (CEF) |
+| `edwin_elastic_poller/sdk/edwin_request.py` | HTTP client for Edwin OAuth and event ingestion |
+| `edwin_elastic_poller/observability/lm_logs.py` | Optional LogicMonitor Logs ingestion handler |
+| `edwin_elastic_poller/mappings/elastic_event_mappings.yaml` | JSONPath mappings from ES documents to CEF fields (override with `EVENT_MAPPING_FILE`) |
+| `tests/test_edwin_elastic_poller.py` | Unit tests for bookmark, query, pagination, and mapping |
 | `tests/test_lm_logs.py` | Unit tests for LM Logs handler and sanitization |
 | `tests/test_env_config.py` | Unit tests for Edwin credential env aliases |
 | `tests/test_integration_elasticsearch.py` | Integration tests against a real Elasticsearch (skipped unless `ES_TEST_URL` is set) |
@@ -24,6 +25,36 @@ This guide covers development setup, testing, and implementation details for mai
 | `tests/test_live_delivery.py` | Live Edwin delivery tests (requires `ES_LIVE_DELIVERY=1` and `EDWIN_*` or `DEXDA_*`) |
 | `tests/es_test_support.py` | Shared Elasticsearch seeding helpers for integration and E2E runs |
 | `scripts/local_e2e.py` | Interactive local multi-poll runner |
+| `pyproject.toml` | Package metadata, runtime dependencies, and console entry point |
+
+## Installing for development
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e .
+```
+
+Runtime dependencies are pinned in `pyproject.toml`. Docker and `pip install edwin-elastic-poller` both install from that same metadata.
+
+## Releasing to PyPI
+
+Publishing is automated by [`.github/workflows/publish.yml`](.github/workflows/publish.yml) when a GitHub release is published.
+
+1. Bump `version` in `pyproject.toml`.
+2. Create a git tag matching that version (`v0.1.0` for version `0.1.0`).
+3. Publish a GitHub release from the tag.
+
+| Release type | Destination |
+|--------------|-------------|
+| **Pre-release** | [TestPyPI](https://test.pypi.org/) (`TESTPYPI_API_TOKEN`) |
+| **Full release** | [PyPI](https://pypi.org/) (`PYPI_API_TOKEN`) |
+
+The workflow verifies that the release tag matches `pyproject.toml` before uploading.
+
+To publish manually from the Actions tab, run **Publish** with `workflow_dispatch` and choose `testpypi` or `pypi`.
+
+Configure GitHub environments `testpypi` and `pypi` with the API tokens as secrets. Optional: enable [PyPI trusted publishing](https://docs.pypi.org/trusted-publishers/) and remove the token secrets later.
 
 ## Supported versions
 
@@ -71,7 +102,7 @@ The optional `lm_logs.py` module ships operational logs to the [LogicMonitor Log
 - Level filtering is applied by the logger (`record.levelno >= handler.level`) before the handler is invoked
 - When `DEBUG=false`, stderr shows INFO+ and the LM handler ships INFO+ operational logs (poll summaries, errors, startup). Set `DEBUG=true` or `LM_LOGS_VERBOSE=true` to also ship DEBUG detail to LM Logs.
 - Handler failures are swallowed and reported to stderr only — they never interrupt the poll loop
-- `common_event` and `edwin_request` use dedicated loggers; mapping fallbacks log at DEBUG and only appear when `DEBUG=true`
+- `common_event` and `edwin_request` live under `edwin_elastic_poller/sdk/` and log recoverable mapping misses and per-batch HTTP detail at DEBUG. Real failures remain at ERROR.
 
 ### Sanitization rules
 
@@ -91,7 +122,7 @@ Structured metadata is attached via `log_with_context()` using the `lm_context` 
 Start a single-node instance:
 
 ```bash
-docker run -d --name elastic-poller-es \
+docker run -d --name edwin-elastic-poller-es \
   -p 9200:9200 \
   -e discovery.type=single-node \
   -e xpack.security.enabled=false \
@@ -146,7 +177,7 @@ ES_LIVE_DELIVERY=1 python scripts/local_e2e.py --es-url http://localhost:9200 --
 
 ## Running tests
 
-Run from the **repository root** — `common_event` resolves the mapping file relative to the working directory.
+Run from the **repository root** or install the package with `pip install -e .`.
 
 ```bash
 # All tests. Integration modules skip themselves when ES_TEST_URL is unset.
@@ -161,6 +192,8 @@ ES_TEST_URL=http://localhost:9200 ES_REQUIRE_INTEGRATION=1 \
 
 CI (see `.github/workflows/test.yml`) runs:
 
-- Unit tests on every push and pull request
+- Unit tests on every push and pull request (`pip install -e .`)
 - Integration tests matrixed over Elasticsearch 8.11.4, 8.19.20 and 9.5.1 (including multi-poll tests)
-- A **live delivery** job when repository secrets `EDWIN_*` or `DEXDA_*` credentials are configured; optionally enables LM Logs when `LM_LOGS_BEARER_TOKEN` is also set
+- Kibana event-log verification against Elasticsearch/Kibana 8.19.20
+- A **live delivery** job when repository secrets `EDWIN_*` or `DEXDA_*` credentials are configured
+- PyPI/TestPyPI publishing on GitHub release (see [Releasing to PyPI](#releasing-to-pypi))

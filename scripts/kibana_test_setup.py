@@ -14,10 +14,24 @@ import uuid
 
 ELASTICSEARCH_URL = os.getenv("ELASTICSEARCH_URL", "http://localhost:9200").rstrip("/")
 KIBANA_URL = os.getenv("KIBANA_URL", "http://localhost:5601").rstrip("/")
-TEST_INDEX = os.getenv("KIBANA_TEST_INDEX", "elastic-poller-kibana-test")
-RULE_NAME = os.getenv("KIBANA_TEST_RULE_NAME", "elastic-poller-kibana-test-rule")
+TEST_INDEX = os.getenv("KIBANA_TEST_INDEX", "edwin-elastic-poller-kibana-test")
+RULE_NAME = os.getenv("KIBANA_TEST_RULE_NAME", "edwin-elastic-poller-kibana-test-rule")
 
-rule_id: str | None = None
+rule_ids: list[str] = []
+
+RULE_SPECS = (
+    ("all-documents", '{"query":{"match_all":{}}}', ">", [0]),
+    ("alert-events", '{"query":{"term":{"event.kind":"alert"}}}', ">", [0]),
+    ("test-events", '{"query":{"term":{"event.category":"test"}}}', ">", [0]),
+    (
+        "named-rule",
+        '{"query":{"term":{"rule.name":"edwin-elastic-poller-kibana-test-rule"}}}',
+        ">",
+        [0],
+    ),
+    ("never-matches", '{"query":{"term":{"event.kind":"missing"}}}', ">", [0]),
+    ("high-volume", '{"query":{"match_all":{}}}', ">", [100]),
+)
 
 
 def request(
@@ -61,7 +75,7 @@ def wait_for(url: str) -> None:
 def create_test_event() -> None:
     event = {
         "@timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "message": "elastic-poller Kibana integration test event",
+        "message": "edwin-elastic-poller Kibana integration test event",
         "event": {
             "provider": "alerting",
             "action": "test-event",
@@ -69,7 +83,7 @@ def create_test_event() -> None:
             "category": ["test"],
         },
         "rule": {
-            "id": "elastic-poller-test-rule",
+            "id": "edwin-elastic-poller-test-rule",
             "name": RULE_NAME,
             "category": "test",
             "license": "basic",
@@ -90,13 +104,19 @@ def create_test_event() -> None:
     )
 
 
-def create_rule() -> str:
+def create_rule(
+    suffix: str,
+    es_query: str,
+    threshold_comparator: str,
+    threshold: list[int],
+) -> str:
     requested_rule_id = str(uuid.uuid4())
+    rule_name = f"{RULE_NAME}-{suffix}"
     status, response = request(
         "POST",
         f"{KIBANA_URL}/api/alerting/rule/{requested_rule_id}",
         {
-            "name": RULE_NAME,
+            "name": rule_name,
             "consumer": "stackAlerts",
             "rule_type_id": ".es-query",
             "schedule": {"interval": "10s"},
@@ -108,14 +128,14 @@ def create_rule() -> str:
                 "termSize": 5,
                 "timeWindowSize": 5,
                 "timeWindowUnit": "m",
-                "thresholdComparator": ">",
-                "threshold": [0],
+                "thresholdComparator": threshold_comparator,
+                "threshold": threshold,
                 "index": [TEST_INDEX],
                 "timeField": "@timestamp",
-                "esQuery": '{"query":{"match_all":{}}}',
+                "esQuery": es_query,
             },
             "actions": [],
-            "tags": ["elastic-poller-test"],
+            "tags": ["edwin-elastic-poller-test"],
         },
         headers={"kbn-xsrf": "true"},
     )
@@ -125,17 +145,21 @@ def create_rule() -> str:
 
 
 def delete_rule() -> None:
-    if not rule_id:
+    if not rule_ids:
         return
-    try:
-        request(
-            "DELETE",
-            f"{KIBANA_URL}/api/alerting/rule/{rule_id}",
-            headers={"kbn-xsrf": "true"},
-        )
-        print(f"Deleted Kibana rule {rule_id}", flush=True)
-    except (OSError, RuntimeError) as error:
-        print(f"Warning: could not delete Kibana rule {rule_id}: {error}", file=sys.stderr)
+    for rule_id in rule_ids:
+        try:
+            request(
+                "DELETE",
+                f"{KIBANA_URL}/api/alerting/rule/{rule_id}",
+                headers={"kbn-xsrf": "true"},
+            )
+            print(f"Deleted Kibana rule {rule_id}", flush=True)
+        except (OSError, RuntimeError) as error:
+            print(
+                f"Warning: could not delete Kibana rule {rule_id}: {error}",
+                file=sys.stderr,
+            )
 
 
 def stop_handler(_signum: int, _frame: object) -> None:
@@ -144,15 +168,16 @@ def stop_handler(_signum: int, _frame: object) -> None:
 
 
 def main() -> None:
-    global rule_id
     signal.signal(signal.SIGTERM, stop_handler)
     signal.signal(signal.SIGINT, stop_handler)
 
     wait_for(f"{ELASTICSEARCH_URL}/_cluster/health")
     wait_for(f"{KIBANA_URL}/api/status")
     create_test_event()
-    rule_id = create_rule()
-    print(f"Created Kibana rule {rule_id}", flush=True)
+    for suffix, es_query, comparator, threshold in RULE_SPECS:
+        created_rule_id = create_rule(suffix, es_query, comparator, threshold)
+        rule_ids.append(created_rule_id)
+        print(f"Created Kibana rule {created_rule_id} ({suffix})", flush=True)
     print(f"Test index: {TEST_INDEX}", flush=True)
     print("Kibana test environment is ready", flush=True)
 

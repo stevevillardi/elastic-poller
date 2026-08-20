@@ -5,7 +5,7 @@ tranches between poll cycles, so bookmark advancement and pagination must work
 together end to end. Delivery is mocked via a collector, so no Edwin credentials
 are required.
 
-Skipped unless ES_TEST_URL is set. Run from the repository root.
+Skipped unless ES_TEST_URL is set.
 
     ES_TEST_URL=http://localhost:9200 ES_REQUIRE_INTEGRATION=1 \
       python -m unittest test_integration_multipoll.py -v
@@ -19,8 +19,8 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-import elastic_poller
-from tests import es_test_support, patch_target
+from edwin_elastic_poller import bookmark, mappings, poller
+from tests import es_test_support, patch_target, storage_patches
 
 ES_TEST_URL = es_test_support.DEFAULT_ES_URL
 
@@ -39,10 +39,10 @@ def setUpModule():
             "ES_REQUIRE_INTEGRATION is set but ES_TEST_URL is empty; "
             "the integration job would have passed without running anything"
         )
-    if ES_TEST_URL and not os.path.exists("elastic_event_mappings.yaml"):
+    if ES_TEST_URL and not mappings.mapping_file_path().exists():
         raise RuntimeError(
-            "Run integration tests from the repository root "
-            "(common_event uses mapping_file_path='.')"
+            "Bundled mapping file is missing; install the package or run from "
+            "a checkout that includes edwin_elastic_poller/mappings/"
         )
 
 
@@ -85,23 +85,21 @@ class MultiPollIntegrationTests(unittest.TestCase):
             "ELASTIC_TOKEN": None,
             "ELASTIC_PIT_KEEP_ALIVE": "1m",
             "ELASTIC_OVERLAP_MS": 300000,
-            "BOOKMARK_PATH": self.temp_dir.name,
             "send_event": self.collector,
-            "bookmark_dir": self.temp_dir.name,
-            "bookmark_file": os.path.join(self.temp_dir.name, "multipoll.bookmark"),
+            **storage_patches(self.temp_dir.name, "multipoll.bookmark"),
         }
         for name, value in patches.items():
             patcher = patch.object(patch_target(name), name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
 
-        elastic_poller.setBookmark(0)
+        bookmark.set_bookmark(0)
 
     def test_events_collected_across_multiple_poll_cycles(self):
         """Seed a tranche, poll, repeat — bookmark must advance between cycles."""
         base_time = es_test_support.current_base_time()
         expected_ids: set[str] = set()
-        bookmark = 0
+        bookmark_ms = 0
         bookmark_loaded = False
         watermark = 0
         batches_before = 0
@@ -116,7 +114,7 @@ class MultiPollIntegrationTests(unittest.TestCase):
                 self.index, docs, es_url=ES_TEST_URL
             )
 
-            bookmark = elastic_poller.poll_cycle(bookmark, watermark, bookmark_loaded)
+            bookmark_ms = poller.poll_cycle(bookmark_ms, watermark, bookmark_loaded)
             bookmark_loaded = True
 
             self.assertEqual(
@@ -132,21 +130,21 @@ class MultiPollIntegrationTests(unittest.TestCase):
             batches_before = len(self.collector.batches)
 
         self.assertEqual(len(self.collector.ids), len(set(self.collector.ids)))
-        self.assertGreater(elastic_poller.getBookmark(), 0)
+        self.assertGreater(bookmark.get_bookmark(), 0)
 
     def test_late_arriving_events_picked_up_on_subsequent_cycles(self):
         """Documents indexed after an empty poll are delivered on the next cycle."""
         base_time = es_test_support.current_base_time()
-        empty_bookmark = elastic_poller.poll_cycle(0, 0, False)
+        empty_bookmark = poller.poll_cycle(0, 0, False)
         self.assertEqual(self.collector.ids, [])
         self.assertEqual(empty_bookmark, 0)
 
         docs = es_test_support.build_batch_docs(0, 8, base_time=base_time)
         expected = es_test_support.bulk_seed(self.index, docs, es_url=ES_TEST_URL)
 
-        bookmark = elastic_poller.poll_cycle(0, 0, False)
+        bookmark_ms = poller.poll_cycle(0, 0, False)
         self.assertEqual(set(self.collector.ids), expected)
-        self.assertGreater(bookmark, 0)
+        self.assertGreater(bookmark_ms, 0)
 
 
 if __name__ == "__main__":

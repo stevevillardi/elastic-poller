@@ -5,8 +5,8 @@ import time
 import unittest
 from unittest.mock import MagicMock, patch
 
-import elastic_poller
-import lm_logs
+from edwin_elastic_poller import config, delivery
+from edwin_elastic_poller.observability import lm_logs
 
 
 class EnvBoolTests(unittest.TestCase):
@@ -47,7 +47,7 @@ class BuildStartupContextTests(unittest.TestCase):
             elastic_index=".kibana-event-log-ds",
             elastic_query="*",
             elastic_batch_size=500,
-            elastic_verify_ssl=True,
+            verify_ssl=True,
             elastic_pit_keep_alive="5m",
             poller_interval="240",
             bookmark_path="/data/acme.elastic.bookmark",
@@ -79,7 +79,7 @@ class LmLogsHandlerTests(unittest.TestCase):
         self.handler._queue.join()
         time.sleep(0.01)
 
-    @patch("lm_logs.requests.post")
+    @patch("edwin_elastic_poller.observability.lm_logs.requests.post")
     def test_emits_info_and_above_at_operational_level(self, mock_post):
         mock_post.return_value = MagicMock(status_code=202)
         test_logger = logging.getLogger("test.lm_logs.info_filter")
@@ -95,7 +95,7 @@ class LmLogsHandlerTests(unittest.TestCase):
         self._wait_for_delivery()
         mock_post.assert_called_once()
 
-    @patch("lm_logs.requests.post")
+    @patch("edwin_elastic_poller.observability.lm_logs.requests.post")
     def test_emits_debug_when_min_level_debug(self, mock_post):
         handler = lm_logs.LmLogsHandler(
             account="acme",
@@ -113,7 +113,7 @@ class LmLogsHandlerTests(unittest.TestCase):
         handler._queue.join()
         mock_post.assert_called_once()
 
-    @patch("lm_logs.requests.post")
+    @patch("edwin_elastic_poller.observability.lm_logs.requests.post")
     def test_payload_includes_msg_and_bearer_auth(self, mock_post):
         mock_post.return_value = MagicMock(status_code=202)
         record = logging.LogRecord(
@@ -146,7 +146,7 @@ class LmLogsHandlerTests(unittest.TestCase):
             {"system.deviceId": "device-123"},
         )
 
-    @patch("lm_logs.requests.post")
+    @patch("edwin_elastic_poller.observability.lm_logs.requests.post")
     def test_does_not_raise_on_http_error(self, mock_post):
         mock_post.return_value = MagicMock(status_code=500, text="error")
         record = logging.LogRecord(
@@ -161,7 +161,7 @@ class LmLogsHandlerTests(unittest.TestCase):
         self.handler.emit(record)  # must not raise
         self._wait_for_delivery()
 
-    @patch("lm_logs.requests.post", side_effect=ConnectionError("network down"))
+    @patch("edwin_elastic_poller.observability.lm_logs.requests.post", side_effect=ConnectionError("network down"))
     def test_does_not_raise_on_network_error(self, mock_post):
         record = logging.LogRecord(
             name="test",
@@ -217,33 +217,32 @@ class ConfigureLoggingTests(unittest.TestCase):
     def test_third_party_loggers_quiet_by_default(self):
         lm_logs.configure_third_party_loggers(debug=False)
         self.assertEqual(
-            logging.getLogger("elastic_poller.common_event").level, logging.ERROR
+            logging.getLogger("edwin_elastic_poller.sdk.common_event").level, logging.ERROR
         )
         self.assertEqual(
-            logging.getLogger("elastic_poller.edwin_request").level, logging.WARNING
+            logging.getLogger("edwin_elastic_poller.sdk.edwin_request").level, logging.WARNING
         )
 
     def test_third_party_loggers_verbose_when_debug(self):
         lm_logs.configure_third_party_loggers(debug=True)
         self.assertEqual(
-            logging.getLogger("elastic_poller.common_event").level, logging.DEBUG
+            logging.getLogger("edwin_elastic_poller.sdk.common_event").level, logging.DEBUG
         )
         self.assertEqual(
-            logging.getLogger("elastic_poller.edwin_request").level, logging.DEBUG
+            logging.getLogger("edwin_elastic_poller.sdk.edwin_request").level, logging.DEBUG
         )
 
 
 class CommonEventLoggingRegressionTests(unittest.TestCase):
     def test_event_mapping_does_not_disable_application_logging(self):
-        from elastic_poller import config
-        from tests.test_elastic_poller import SAMPLE_HIT
+        from tests.test_edwin_elastic_poller import SAMPLE_HIT
 
         config.logger = lm_logs.configure_logging(
             log_enabled=True,
             debug=True,
             lm_logs_enabled=False,
         )
-        elastic_poller.delivery.create_event(SAMPLE_HIT)
+        delivery.create_event(SAMPLE_HIT)
         self.assertEqual(logging.root.manager.disable, logging.NOTSET)
         self.assertTrue(config.logger.isEnabledFor(logging.INFO))
 

@@ -1,4 +1,4 @@
-"""Integration tests for elastic_poller against a real Elasticsearch.
+"""Integration tests for edwin_elastic_poller against a real Elasticsearch.
 
 These exist because the unit suite structurally cannot catch a query body that
 Elasticsearch rejects: every ES-touching unit test mocks the transport, so the
@@ -17,8 +17,7 @@ instead of silently skipping every test.
     ES_TEST_URL=http://localhost:9200 ES_REQUIRE_INTEGRATION=1 \
       python -m unittest test_integration_elasticsearch.py -v
 
-Must be run from the repository root: common_event resolves the mapping file
-relative to the working directory.
+Must be run from the repository root or with the package installed.
 """
 
 import json
@@ -32,8 +31,8 @@ from unittest.mock import patch
 
 import requests
 
-import elastic_poller
-from tests import es_test_support, patch_target
+from edwin_elastic_poller import bookmark, elasticsearch, mappings, poller
+from tests import es_test_support, patch_target, storage_patches
 
 
 ES_TEST_URL = (os.getenv("ES_TEST_URL") or "").rstrip("/")
@@ -65,12 +64,10 @@ def setUpModule():
             "ES_REQUIRE_INTEGRATION is set but ES_TEST_URL is empty; "
             "the integration job would have passed without running anything"
         )
-    if ES_TEST_URL and not os.path.exists("elastic_event_mappings.yaml"):
-        # createEvent calls sys.exit(3) on a mapping failure, which would kill
-        # the whole test process rather than fail a single test.
+    if ES_TEST_URL and not mappings.mapping_file_path().exists():
         raise RuntimeError(
-            "Run integration tests from the repository root "
-            "(common_event uses mapping_file_path='.')"
+            "Bundled mapping file is missing; install the package or run from "
+            "a checkout that includes edwin_elastic_poller/mappings/"
         )
 
 
@@ -259,9 +256,8 @@ class ElasticsearchIntegrationTests(unittest.TestCase):
 
         temp_dir = tempfile.TemporaryDirectory()
         self.addCleanup(temp_dir.cleanup)
-        self._patch("BOOKMARK_PATH", temp_dir.name)
-        self._patch("bookmark_dir", temp_dir.name)
-        self._patch("bookmark_file", os.path.join(temp_dir.name, "it.elastic.bookmark"))
+        for name, value in storage_patches(temp_dir.name, "it.elastic.bookmark").items():
+            self._patch(name, value)
 
         self.collector = _Collector()
         self._patch("send_event", self.collector)
@@ -351,14 +347,14 @@ class ElasticsearchIntegrationTests(unittest.TestCase):
 
     def test_real_query_is_accepted_by_elasticsearch(self):
         """The regression the unit suite structurally cannot catch."""
-        pit_id = elastic_poller.open_point_in_time(
-            INDEX, **elastic_poller._es_conn_kwargs()
+        pit_id = elasticsearch.open_point_in_time(
+            INDEX, **elasticsearch._es_conn_kwargs()
         )
         self.addCleanup(
-            elastic_poller.close_point_in_time, pit_id, **elastic_poller._es_conn_kwargs()
+            elasticsearch.close_point_in_time, pit_id, **elasticsearch._es_conn_kwargs()
         )
 
-        hits, _took, returned_pit = elastic_poller.fetch_elasticsearch_hits(
+        hits, _took, returned_pit = elasticsearch.fetch_elasticsearch_hits(
             0, pit_id=pit_id
         )
 
@@ -372,7 +368,7 @@ class ElasticsearchIntegrationTests(unittest.TestCase):
     # --- pagination correctness -------------------------------------------
 
     def test_poll_cycle_collects_every_doc_exactly_once(self):
-        result = elastic_poller.poll_cycle(0, 0, False)
+        result = poller.poll_cycle(0, 0, False)
 
         collected = self.collector.ids
         self.assertEqual(
@@ -387,25 +383,25 @@ class ElasticsearchIntegrationTests(unittest.TestCase):
         self.assertEqual(result, LAST_TAIL_MS)
 
     def test_bookmark_advances_to_last_timestamp(self):
-        result = elastic_poller.poll_cycle(0, 0, False)
+        result = poller.poll_cycle(0, 0, False)
         self.assertEqual(result, LAST_TAIL_MS)
-        self.assertEqual(elastic_poller.getBookmark(), LAST_TAIL_MS)
+        self.assertEqual(bookmark.get_bookmark(), LAST_TAIL_MS)
 
     def test_bookmark_not_advanced_on_delivery_failure(self):
         collector = _Collector(fail_on_batch=1)
         self._patch("send_event", collector)
-        elastic_poller.setBookmark(0)
+        bookmark.set_bookmark(0)
 
-        result = elastic_poller.poll_cycle(0, 0, False)
+        result = poller.poll_cycle(0, 0, False)
 
         # Only the first batch was accepted, so the bookmark stops there.
         self.assertEqual(result, IDENTICAL_TS_MS)
-        self.assertEqual(elastic_poller.getBookmark(), IDENTICAL_TS_MS)
+        self.assertEqual(bookmark.get_bookmark(), IDENTICAL_TS_MS)
         self.assertLess(len(collector.ids), len(self.seeded_ids))
 
     def test_query_string_filter_is_applied(self):
         self._patch("ELASTIC_QUERY", "event.action:tail-only")
-        elastic_poller.poll_cycle(0, 0, False)
+        poller.poll_cycle(0, 0, False)
         self.assertEqual(
             set(self.collector.ids),
             {f"tail-{i:03d}" for i in range(TAIL_COUNT)},
@@ -415,22 +411,22 @@ class ElasticsearchIntegrationTests(unittest.TestCase):
 
     def test_pit_is_released_after_successful_cycle(self):
         baseline = self._open_contexts()
-        elastic_poller.poll_cycle(0, 0, False)
+        poller.poll_cycle(0, 0, False)
         self._assert_contexts_return_to(baseline)
 
     def test_pit_is_released_when_delivery_fails(self):
         """The leak the try/finally exists to prevent."""
         self._patch("send_event", _Collector(fail_on_batch=0))
         baseline = self._open_contexts()
-        elastic_poller.poll_cycle(0, 0, False)
+        poller.poll_cycle(0, 0, False)
         self._assert_contexts_return_to(baseline)
 
     def test_close_point_in_time_reports_succeeded(self):
-        conn = elastic_poller._es_conn_kwargs()
-        pit_id = elastic_poller.open_point_in_time(INDEX, **conn)
-        self.assertTrue(elastic_poller.close_point_in_time(pit_id, **conn))
+        conn = elasticsearch._es_conn_kwargs()
+        pit_id = elasticsearch.open_point_in_time(INDEX, **conn)
+        self.assertTrue(elasticsearch.close_point_in_time(pit_id, **conn))
         # Closing an already-released PIT must not raise.
-        self.assertFalse(elastic_poller.close_point_in_time(pit_id, **conn))
+        self.assertFalse(elasticsearch.close_point_in_time(pit_id, **conn))
 
 
 @requires_es
@@ -502,17 +498,15 @@ class MultiIndexIntegrationTests(unittest.TestCase):
             "ELASTIC_PASS": None,
             "ELASTIC_TOKEN": None,
             "ELASTIC_OVERLAP_MS": 300000,
-            "BOOKMARK_PATH": temp_dir.name,
             "send_event": collector,
-            "bookmark_dir": temp_dir.name,
-            "bookmark_file": os.path.join(temp_dir.name, "multi.bookmark"),
+            **storage_patches(temp_dir.name, "multi.bookmark"),
         }
         for name, value in patches.items():
             patcher = patch.object(patch_target(name), name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
 
-        elastic_poller.poll_cycle(0, 0, False)
+        poller.poll_cycle(0, 0, False)
         return collector
 
     def test_comma_separated_indices_are_all_polled(self):

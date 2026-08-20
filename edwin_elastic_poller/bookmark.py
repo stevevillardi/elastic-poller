@@ -5,10 +5,8 @@ from __future__ import annotations
 import os
 import tempfile
 
-from elastic_poller import config
-
-bookmark_dir = config.BOOKMARK_PATH.rstrip("/") if config.BOOKMARK_PATH else "."
-bookmark_file = os.path.join(bookmark_dir, f"{config.EDWIN_ORG}.elastic.bookmark")
+from edwin_elastic_poller import config
+from edwin_elastic_poller import storage_paths
 
 
 class BookmarkError(ValueError):
@@ -17,6 +15,8 @@ class BookmarkError(ValueError):
 
 def get_bookmark() -> int:
     """Read the bookmark file. Creates the file with 0 if it does not exist."""
+    bookmark_dir = storage_paths.data_dir()
+    bookmark_file = storage_paths.bookmark_file()
     os.makedirs(bookmark_dir, exist_ok=True)
     if not os.path.exists(bookmark_file):
         config.logger.info("Bookmark file not found, creating it")
@@ -39,6 +39,8 @@ def get_bookmark() -> int:
 
 def set_bookmark(bookmark: int) -> None:
     """Persist the bookmark as epoch milliseconds (last successfully sent event)."""
+    bookmark_dir = storage_paths.data_dir()
+    bookmark_file = storage_paths.bookmark_file()
     os.makedirs(bookmark_dir, exist_ok=True)
     if bookmark < 0:
         raise BookmarkError("Bookmark must be non-negative")
@@ -59,8 +61,3 @@ def set_bookmark(bookmark: int) -> None:
         raise BookmarkError(
             f"Could not atomically write bookmark file {bookmark_file}"
         ) from error
-
-
-# Legacy names kept for tests and external callers.
-getBookmark = get_bookmark
-setBookmark = set_bookmark

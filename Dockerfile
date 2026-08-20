@@ -2,12 +2,11 @@ FROM python:3.12
 
 WORKDIR /app
 
-COPY requirements.txt requirements.txt
-RUN pip3 install --no-cache-dir -r /app/requirements.txt
-
-COPY elastic_poller/ edwin_request.py common_event.py lm_logs.py ./
-COPY elastic_event_mappings.yaml ./
+COPY pyproject.toml README.md LICENSE ./
+COPY edwin_elastic_poller/ edwin_elastic_poller/
+RUN pip3 install --no-cache-dir "setuptools>=61" \
+    && pip3 install --no-cache-dir --no-build-isolation .
 
 ENV BOOKMARK_PATH=/data/
 
-CMD ["python3", "-u", "-m", "elastic_poller"]
+CMD ["python3", "-u", "-m", "edwin_elastic_poller"]

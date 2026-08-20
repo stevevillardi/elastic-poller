@@ -8,8 +8,8 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-import lm_logs
-from elastic_poller import config
+from edwin_elastic_poller.observability import lm_logs
+from edwin_elastic_poller import config
 
 
 class ElasticsearchQueryError(Exception):

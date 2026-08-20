@@ -4,7 +4,7 @@ import os
 import unittest
 from unittest.mock import patch
 
-from elastic_poller import config
+from edwin_elastic_poller import config
 
 
 class EnvConfigAliasTests(unittest.TestCase):
@@ -44,6 +44,35 @@ class EnvConfigAliasTests(unittest.TestCase):
             self.assertEqual(len(config.missing_edwin_credential_names()), 3)
 
 
+class VerifySslConfigTests(unittest.TestCase):
+    def test_verify_ssl_applies_to_all_clients(self):
+        with patch.dict(os.environ, {"VERIFY_SSL": "false"}, clear=True):
+            self.assertFalse(config.resolve_verify_ssl("ELASTIC_VERIFY_SSL"))
+            self.assertFalse(config.resolve_verify_ssl("EDWIN_VERIFY_SSL"))
+
+    def test_verify_ssl_overrides_legacy_aliases(self):
+        with patch.dict(
+            os.environ,
+            {
+                "VERIFY_SSL": "true",
+                "ELASTIC_VERIFY_SSL": "false",
+                "EDWIN_VERIFY_SSL": "false",
+            },
+            clear=True,
+        ):
+            self.assertTrue(config.resolve_verify_ssl("ELASTIC_VERIFY_SSL"))
+            self.assertTrue(config.resolve_verify_ssl("EDWIN_VERIFY_SSL"))
+
+    def test_legacy_aliases_used_when_verify_ssl_unset(self):
+        with patch.dict(
+            os.environ,
+            {"ELASTIC_VERIFY_SSL": "false", "EDWIN_VERIFY_SSL": "true"},
+            clear=True,
+        ):
+            self.assertFalse(config.resolve_verify_ssl("ELASTIC_VERIFY_SSL"))
+            self.assertTrue(config.resolve_verify_ssl("EDWIN_VERIFY_SSL"))
+
+
 class RuntimeValidationTests(unittest.TestCase):
     def test_rejects_missing_required_settings(self):
         with patch.dict(os.environ, {}, clear=True), patch.multiple(
@@ -59,6 +88,7 @@ class RuntimeValidationTests(unittest.TestCase):
             ELASTIC_PASS=None,
             PAUSE_INTERVAL=240,
             LM_LOGS_ENABLED=False,
+            EVENT_MAPPING_FILE=None,
         ):
             with self.assertRaises(config.ConfigurationError) as context:
                 config.validate_config()
@@ -83,8 +113,29 @@ class RuntimeValidationTests(unittest.TestCase):
             ELASTIC_PASS=None,
             PAUSE_INTERVAL=240,
             LM_LOGS_ENABLED=False,
+            EVENT_MAPPING_FILE=None,
         ):
             config.validate_config()
+
+    def test_rejects_missing_custom_mapping_file(self):
+        with patch.dict(os.environ, {}, clear=True), patch.multiple(
+            config,
+            ELASTIC_URL="https://es.example.com",
+            ELASTIC_INDEX="events-*",
+            ELASTIC_BATCH_SIZE=500,
+            ELASTIC_OVERLAP_MS=300000,
+            DEDUPE_MAX_RECORDS=250000,
+            DEDUPE_MAX_SIZE_MB=256,
+            ELASTIC_TOKEN="api-key",
+            ELASTIC_USER=None,
+            ELASTIC_PASS=None,
+            PAUSE_INTERVAL=240,
+            LM_LOGS_ENABLED=False,
+            EVENT_MAPPING_FILE="/path/does/not/exist.yaml",
+        ):
+            with self.assertRaises(config.ConfigurationError) as context:
+                config.validate_config()
+        self.assertIn("EVENT_MAPPING_FILE", str(context.exception))
 
 
 if __name__ == "__main__":

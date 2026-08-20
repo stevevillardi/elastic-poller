@@ -72,7 +72,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--poll-interval", type=int, default=5)
     parser.add_argument("--es-url", default=None,
                         help="host Elasticsearch URL; defaults to ELASTIC_URL in .env")
-    parser.add_argument("--image", default="elastic-poller:local-load-test")
+    parser.add_argument("--image", default="edwin-elastic-poller:local-load-test")
     parser.add_argument(
         "--pip-trusted-host",
         action="append",
@@ -224,16 +224,13 @@ def build_image(image: str, trusted_hosts: list[str], data_dir: Path) -> None:
 
 WORKDIR /app
 
-COPY requirements.txt requirements.txt
-RUN pip3 install --no-cache-dir {trusted_flags} -r /app/requirements.txt
-
-COPY elastic_poller ./elastic_poller
-COPY edwin_request.py common_event.py lm_logs.py ./
-COPY elastic_event_mappings.yaml ./
+COPY pyproject.toml README.md ./
+COPY edwin_elastic_poller ./edwin_elastic_poller
+RUN pip3 install --no-cache-dir {trusted_flags} .
 
 ENV BOOKMARK_PATH=/data/
 
-CMD ["python3", "-u", "-m", "elastic_poller"]
+CMD ["python3", "-u", "-m", "edwin_elastic_poller"]
 """,
         encoding="utf-8",
     )
@@ -382,8 +379,7 @@ def main() -> int:
             "-e", f"ELASTIC_BATCH_SIZE={args.page_size}",
             "-e", f"POLLER_INTERVAL={args.poll_interval}",
             "-e", "ELASTIC_QUERY=*",
-            "-e", "ELASTIC_VERIFY_SSL=false",
-            "-e", "EDWIN_VERIFY_SSL=false",
+            "-e", "VERIFY_SSL=false",
             "-e", "BOOKMARK_PATH=/data",
             "-v", f"{data_dir}:/data",
             args.image,

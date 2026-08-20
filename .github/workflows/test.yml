@@ -22,7 +22,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -e .
 
       - name: Run unit tests
         run: python -m unittest discover -s tests -t . -p "test_*.py" -v
@@ -68,7 +68,7 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -e .
 
       - name: Wait for Elasticsearch
         run: |
@@ -86,70 +86,9 @@ jobs:
         run: |
           python -m unittest discover -s tests -t . -p "test_integration_*.py" -v
 
-  check-live-creds:
-    name: Check live delivery credentials
+  kibana-event-log:
+    name: Kibana event-log integration (8.19.20)
     runs-on: ubuntu-latest
-    outputs:
-      configured: ${{ steps.check.outputs.configured }}
-    steps:
-      - id: check
-        env:
-          EDWIN_ORG: ${{ secrets.EDWIN_ORG }}
-          EDWIN_ID: ${{ secrets.EDWIN_ID }}
-          EDWIN_TOKEN: ${{ secrets.EDWIN_TOKEN }}
-          DEXDA_ORG: ${{ secrets.DEXDA_ORG }}
-          DEXDA_ID: ${{ secrets.DEXDA_ID }}
-          DEXDA_TOKEN: ${{ secrets.DEXDA_TOKEN }}
-        run: |
-          has_edwin=false
-          has_dexda=false
-          if [ -n "$EDWIN_ORG" ] && [ -n "$EDWIN_ID" ] && [ -n "$EDWIN_TOKEN" ]; then
-            has_edwin=true
-          fi
-          if [ -n "$DEXDA_ORG" ] && [ -n "$DEXDA_ID" ] && [ -n "$DEXDA_TOKEN" ]; then
-            has_dexda=true
-          fi
-          if [ "$has_edwin" = true ] || [ "$has_dexda" = true ]; then
-            echo "configured=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "configured=false" >> "$GITHUB_OUTPUT"
-          fi
-
-  live-delivery:
-    name: Live delivery (Edwin)
-    needs: check-live-creds
-    if: needs.check-live-creds.outputs.configured == 'true'
-    runs-on: ubuntu-latest
-    services:
-      elasticsearch:
-        image: docker.elastic.co/elasticsearch/elasticsearch:8.19.20
-        env:
-          discovery.type: single-node
-          xpack.security.enabled: "false"
-          xpack.security.http.ssl.enabled: "false"
-          xpack.license.self_generated.type: basic
-          ES_JAVA_OPTS: "-Xms1g -Xmx1g"
-          cluster.routing.allocation.disk.threshold_enabled: "false"
-        ports:
-          - 9200:9200
-        options: >-
-          --health-cmd "curl -fsS 'http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s' || exit 1"
-          --health-interval 10s
-          --health-timeout 10s
-          --health-retries 30
-          --health-start-period 45s
-    env:
-      ES_TEST_URL: http://localhost:9200
-      ES_REQUIRE_INTEGRATION: "1"
-      ES_LIVE_DELIVERY: "1"
-      EDWIN_ORG: ${{ secrets.EDWIN_ORG }}
-      EDWIN_ID: ${{ secrets.EDWIN_ID }}
-      EDWIN_TOKEN: ${{ secrets.EDWIN_TOKEN }}
-      DEXDA_ORG: ${{ secrets.DEXDA_ORG }}
-      DEXDA_ID: ${{ secrets.DEXDA_ID }}
-      DEXDA_TOKEN: ${{ secrets.DEXDA_TOKEN }}
-      LM_LOGS_BEARER_TOKEN: ${{ secrets.LM_LOGS_BEARER_TOKEN }}
-      LM_LOGS_ACCOUNT: ${{ secrets.LM_LOGS_ACCOUNT }}
     steps:
       - uses: actions/checkout@v4
 
@@ -158,29 +97,20 @@ jobs:
           python-version: "3.12"
 
       - name: Install dependencies
-        run: pip install -r requirements.txt
+        run: pip install -e .
 
-      - name: Wait for Elasticsearch
-        run: |
-          for _ in $(seq 1 60); do
-            if curl -fsS "http://localhost:9200/_cluster/health?wait_for_status=yellow&timeout=5s" >/dev/null; then
-              exit 0
-            fi
-            sleep 5
-          done
-          echo "Elasticsearch did not become ready"
-          exit 1
+      - name: Start Elasticsearch and Kibana 8.19.20 stack
+        run: docker compose -f docker-compose.kibana-test.yml up -d
 
-      - name: Enable LM Logs when bearer token is configured
+      - name: Verify real Kibana event-log documents
         env:
-          LM_LOGS_BEARER_TOKEN: ${{ secrets.LM_LOGS_BEARER_TOKEN }}
+          ELASTICSEARCH_URL: http://localhost:9200
         run: |
-          if [ -n "$LM_LOGS_BEARER_TOKEN" ]; then
-            echo "LM_LOGS_ENABLED=true" >> "$GITHUB_ENV"
-          fi
+          set -euo pipefail
+          python scripts/verify_kibana_event_log.py
 
-      - name: Run multi-poll integration tests
-        run: python -m unittest tests.test_integration_multipoll -v
-
-      - name: Run live Edwin delivery tests
-        run: python -m unittest tests.test_live_delivery -v
+      - name: Tear down Elasticsearch and Kibana stack
+        if: always()
+        run: |
+          docker compose -f docker-compose.kibana-test.yml logs --no-color
+          docker compose -f docker-compose.kibana-test.yml down --volumes --remove-orphans

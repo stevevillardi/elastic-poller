@@ -1,0 +1,48 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "edwin-elastic-poller"
+version = "0.1.0"
+description = "Poll Elasticsearch Kibana event logs and deliver them to Edwin"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.12"
+authors = [{ name = "LogicMonitor" }]
+keywords = ["edwin", "elasticsearch", "kibana", "integration", "polling"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: System :: Monitoring",
+]
+dependencies = [
+    "jsonpath-ng==1.8.0",
+    "pydantic==2.13.4",
+    "python-dotenv==1.2.3",
+    "python-dateutil==2.9.0.post0",
+    "PyYAML==6.0.3",
+    "requests==2.34.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/stevevillardi/elastic-poller"
+Repository = "https://github.com/stevevillardi/elastic-poller"
+Issues = "https://github.com/stevevillardi/elastic-poller/issues"
+Documentation = "https://github.com/stevevillardi/elastic-poller#readme"
+
+[project.scripts]
+edwin-elastic-poller = "edwin_elastic_poller.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["edwin_elastic_poller*"]
+
+[tool.setuptools.package-data]
+"edwin_elastic_poller.mappings" = ["*.yaml"]

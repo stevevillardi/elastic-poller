@@ -1,4 +1,4 @@
-"""Optional LogicMonitor Logs ingestion handler for elastic-poller."""
+"""Optional LogicMonitor Logs ingestion handler for edwin-elastic-poller."""
 
 from __future__ import annotations
 
@@ -14,29 +14,29 @@ from urllib.parse import urlparse
 
 import requests
 
-COMPONENT = "elastic-poller"
+COMPONENT = "edwin-elastic-poller"
 LM_LOGS_INGEST_PATH = "/rest/log/ingest"
 # Operational summaries, errors, and startup always ship when LM Logs is enabled.
 LM_OPERATIONAL_LEVEL = logging.INFO
 # SDK modules that emit verbose mapping/delivery detail at DEBUG.
-_THIRD_PARTY_LOGGERS = ("elastic_poller.common_event", "elastic_poller.edwin_request")
+_THIRD_PARTY_LOGGERS = (
+    "edwin_elastic_poller.sdk.common_event",
+    "edwin_elastic_poller.sdk.edwin_request",
+)
 
 
 def env_bool(name: str, default: bool = False) -> bool:
     """Return True when an environment variable is set to a truthy string."""
-    from elastic_poller.config import env_bool as _env_bool
+    from edwin_elastic_poller.config import env_bool as _env_bool
 
     return _env_bool(name, default=default)
 
 
 def verify_edwin_ssl() -> bool:
-    """Return Edwin/LM Logs TLS verification setting and suppress its local warning."""
-    verify = env_bool("EDWIN_VERIFY_SSL", default=True)
-    if not verify:
-        requests.packages.urllib3.disable_warnings(
-            requests.packages.urllib3.exceptions.InsecureRequestWarning
-        )
-    return verify
+    """Return TLS verification for LM Logs HTTPS requests."""
+    from edwin_elastic_poller import config
+
+    return config.EDWIN_VERIFY_SSL
 
 
 def sanitize_elastic_url(url: Optional[str]) -> str:
@@ -59,7 +59,7 @@ def build_startup_context(
     elastic_index: Optional[str],
     elastic_query: str,
     elastic_batch_size: int,
-    elastic_verify_ssl: bool,
+    verify_ssl: bool,
     elastic_pit_keep_alive: str,
     poller_interval: str,
     bookmark_path: str,
@@ -68,14 +68,14 @@ def build_startup_context(
 ) -> Dict[str, Any]:
     """Build a non-sensitive configuration snapshot for startup logging."""
     return {
-        "msg": "elastic-poller started",
+        "msg": "edwin-elastic-poller started",
         "component": COMPONENT,
         "edwin_org": edwin_org or "",
         "elastic_host": sanitize_elastic_url(elastic_url),
         "elastic_index": elastic_index or "",
         "elastic_query": elastic_query,
         "elastic_batch_size": elastic_batch_size,
-        "elastic_verify_ssl": elastic_verify_ssl,
+        "verify_ssl": verify_ssl,
         "elastic_pit_keep_alive": elastic_pit_keep_alive,
         "poller_interval": poller_interval,
         "bookmark_path": bookmark_path,
@@ -194,8 +194,8 @@ def configure_third_party_loggers(*, debug: bool = False) -> None:
     sdk_level = logging.DEBUG if debug else logging.ERROR
     delivery_level = logging.DEBUG if debug else logging.WARNING
     levels = {
-        "elastic_poller.common_event": sdk_level,
-        "elastic_poller.edwin_request": delivery_level,
+        "edwin_elastic_poller.sdk.common_event": sdk_level,
+        "edwin_elastic_poller.sdk.edwin_request": delivery_level,
     }
     for name in _THIRD_PARTY_LOGGERS:
         logging.getLogger(name).setLevel(levels[name])
@@ -210,7 +210,7 @@ def configure_logging(
     lm_logs_bearer_token: Optional[str] = None,
     lm_logs_resource_id: Optional[str] = None,
     lm_logs_verbose: bool = False,
-    logger_name: str = "elastic_poller",
+    logger_name: str = "edwin_elastic_poller",
 ) -> logging.Logger:
     """Configure stderr logging and an optional LM Logs handler.
 

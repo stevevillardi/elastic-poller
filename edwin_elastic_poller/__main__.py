@@ -6,19 +6,21 @@ import sys
 import time
 from datetime import datetime, timedelta, timezone
 
-import lm_logs
-from elastic_poller import bookmark, config, elasticsearch, poller
+from edwin_elastic_poller import bookmark, config, elasticsearch, poller
+from edwin_elastic_poller import storage_paths
+from edwin_elastic_poller.observability import lm_logs
 
 
 def main() -> None:
     try:
+        config.bootstrap()
         config.validate_config()
         poller.log_startup()
         config.logger.info(
             "Edwin org: %s | Elasticsearch: %s | Bookmark file: %s",
             config.EDWIN_ORG,
             lm_logs.sanitize_elastic_url(config.ELASTIC_URL),
-            bookmark.bookmark_file,
+            storage_paths.bookmark_file(),
         )
 
         two_hours_ago = datetime.now(timezone.utc) - timedelta(hours=2)
@@ -51,7 +53,7 @@ def main() -> None:
         config.logger.info("Shutdown requested")
         sys.exit(config.OK)
     except Exception:
-        config.logger.exception("Unhandled elastic-poller failure")
+        config.logger.exception("Unhandled edwin-elastic-poller failure")
         sys.exit(config.ERROR_CODE_UNEXPECTED)
 
 

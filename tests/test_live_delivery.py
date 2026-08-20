@@ -25,10 +25,9 @@ import unittest
 import uuid
 from unittest.mock import patch
 
-import elastic_poller
-import lm_logs
-from elastic_poller import config
-from tests import es_test_support, patch_target
+from edwin_elastic_poller import bookmark, config, mappings, poller
+from edwin_elastic_poller.observability import lm_logs
+from tests import es_test_support, patch_target, storage_patches
 
 ES_TEST_URL = es_test_support.DEFAULT_ES_URL
 LIVE_CREDENTIALS = config.has_edwin_credentials()
@@ -50,8 +49,11 @@ def setUpModule():
         raise RuntimeError(
             "ES_REQUIRE_INTEGRATION is set but ES_TEST_URL is empty"
         )
-    if ES_TEST_URL and not os.path.exists("elastic_event_mappings.yaml"):
-        raise RuntimeError("Run live tests from the repository root")
+    if ES_TEST_URL and not mappings.mapping_file_path().exists():
+        raise RuntimeError(
+            "Bundled mapping file is missing; install the package or run from "
+            "a checkout that includes edwin_elastic_poller/mappings/"
+        )
 
 
 @requires_es
@@ -81,16 +83,14 @@ class LiveDeliveryTests(unittest.TestCase):
             "ELASTIC_TOKEN": None,
             "ELASTIC_PIT_KEEP_ALIVE": "2m",
             "ELASTIC_OVERLAP_MS": 300000,
-            "BOOKMARK_PATH": self.temp_dir.name,
-            "bookmark_dir": self.temp_dir.name,
-            "bookmark_file": os.path.join(self.temp_dir.name, "live.bookmark"),
+            **storage_patches(self.temp_dir.name, "live.bookmark"),
         }
         for name, value in patches.items():
             patcher = patch.object(patch_target(name), name, value)
             patcher.start()
             self.addCleanup(patcher.stop)
 
-        elastic_poller.setBookmark(0)
+        bookmark.set_bookmark(0)
 
         if lm_logs.env_bool("LM_LOGS_ENABLED") and os.getenv("LM_LOGS_BEARER_TOKEN"):
             config.logger = lm_logs.configure_logging(
@@ -123,9 +123,9 @@ class LiveDeliveryTests(unittest.TestCase):
         )
         es_test_support.bulk_seed(self.index, first_docs, es_url=ES_TEST_URL)
 
-        bookmark = elastic_poller.poll_cycle(0, 0, False)
-        self.assertGreater(bookmark, 0)
-        self.assertEqual(elastic_poller.getBookmark(), bookmark)
+        bookmark_ms = poller.poll_cycle(0, 0, False)
+        self.assertGreater(bookmark_ms, 0)
+        self.assertEqual(bookmark.get_bookmark(), bookmark_ms)
 
         second_docs = es_test_support.build_batch_docs(
             1,
@@ -135,8 +135,8 @@ class LiveDeliveryTests(unittest.TestCase):
         )
         es_test_support.bulk_seed(self.index, second_docs, es_url=ES_TEST_URL)
 
-        next_bookmark = elastic_poller.poll_cycle(bookmark, 0, True)
-        self.assertGreater(next_bookmark, bookmark)
+        next_bookmark = poller.poll_cycle(bookmark_ms, 0, True)
+        self.assertGreater(next_bookmark, bookmark_ms)
 
 
 if __name__ == "__main__":

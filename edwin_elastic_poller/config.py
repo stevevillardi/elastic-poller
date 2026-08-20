@@ -1,13 +1,13 @@
-"""Environment configuration for elastic-poller."""
+"""Environment configuration for edwin-elastic-poller."""
 
 from __future__ import annotations
 
+import logging
 import os
+from pathlib import Path
 from typing import Optional
 
 from dotenv import load_dotenv
-
-import lm_logs
 
 load_dotenv()
 
@@ -25,6 +25,9 @@ EDWIN_CREDENTIAL_VARS = (
     ("EDWIN_ID", "DEXDA_ID"),
     ("EDWIN_TOKEN", "DEXDA_TOKEN"),
 )
+
+_bootstrapped = False
+logger = logging.getLogger("edwin_elastic_poller")
 
 
 def env_bool(name: str, default: bool = False) -> bool:
@@ -92,8 +95,38 @@ ELASTIC_URL = os.getenv("ELASTIC_URL")
 ELASTIC_BATCH_SIZE = env_int("ELASTIC_BATCH_SIZE", 500)
 ELASTIC_INDEX = os.getenv("ELASTIC_INDEXS")
 ELASTIC_QUERY = os.getenv("ELASTIC_QUERY", "*")
-ELASTIC_VERIFY_SSL = env_bool("ELASTIC_VERIFY_SSL", default=True)
 ELASTIC_PIT_KEEP_ALIVE = os.getenv("ELASTIC_PIT_KEEP_ALIVE", "5m")
+
+
+def resolve_verify_ssl(*legacy_names: str, default: bool = True) -> bool:
+    """Return TLS verification for outbound HTTPS clients.
+
+    ``VERIFY_SSL`` applies to Elasticsearch, Edwin, and LM Logs when set.
+    Legacy ``ELASTIC_VERIFY_SSL`` / ``EDWIN_VERIFY_SSL`` are honored only when
+    ``VERIFY_SSL`` is unset.
+    """
+    if os.getenv("VERIFY_SSL") is not None:
+        return env_bool("VERIFY_SSL", default=default)
+    for legacy_name in legacy_names:
+        if os.getenv(legacy_name) is not None:
+            return env_bool(legacy_name, default=default)
+    return default
+
+
+VERIFY_SSL = resolve_verify_ssl("ELASTIC_VERIFY_SSL", "EDWIN_VERIFY_SSL")
+ELASTIC_VERIFY_SSL = resolve_verify_ssl("ELASTIC_VERIFY_SSL")
+EDWIN_VERIFY_SSL = resolve_verify_ssl("EDWIN_VERIFY_SSL")
+
+
+def suppress_insecure_request_warnings() -> None:
+    """Silence urllib3 warnings when TLS verification is disabled."""
+    if ELASTIC_VERIFY_SSL and EDWIN_VERIFY_SSL:
+        return
+    import requests
+
+    requests.packages.urllib3.disable_warnings(
+        requests.packages.urllib3.exceptions.InsecureRequestWarning
+    )
 ELASTIC_OVERLAP_MS = env_int("ELASTIC_OVERLAP_MS", 300000)
 DEDUPE_MAX_RECORDS = env_int("DEDUPE_MAX_RECORDS", 250000)
 DEDUPE_MAX_SIZE_MB = env_int("DEDUPE_MAX_SIZE_MB", 256)
@@ -121,6 +154,7 @@ LM_LOGS_ACCOUNT = os.getenv("LM_LOGS_ACCOUNT") or edwin_org()
 LM_LOGS_BEARER_TOKEN = os.getenv("LM_LOGS_BEARER_TOKEN")
 LM_LOGS_RESOURCE_ID = os.getenv("LM_LOGS_RESOURCE_ID")
 FAILED_PAYLOAD_PATH = os.getenv("FAILED_PAYLOAD_PATH")
+EVENT_MAPPING_FILE = os.getenv("EVENT_MAPPING_FILE")
 
 
 class ConfigurationError(ValueError):
@@ -161,15 +195,33 @@ def validate_config() -> None:
             "LM_LOGS_ACCOUNT and LM_LOGS_BEARER_TOKEN are required when "
             "LM_LOGS_ENABLED is true"
         )
+    if EVENT_MAPPING_FILE:
+        mapping_path = Path(EVENT_MAPPING_FILE).expanduser()
+        if not mapping_path.is_file():
+            errors.append(
+                f"EVENT_MAPPING_FILE does not exist or is not a file: "
+                f"{EVENT_MAPPING_FILE}"
+            )
     if errors:
         raise ConfigurationError("; ".join(errors))
 
-logger = lm_logs.configure_logging(
-    debug=DEBUG,
-    log_enabled=LOG_ENABLED,
-    lm_logs_enabled=LM_LOGS_ENABLED,
-    lm_logs_account=LM_LOGS_ACCOUNT,
-    lm_logs_bearer_token=LM_LOGS_BEARER_TOKEN,
-    lm_logs_resource_id=LM_LOGS_RESOURCE_ID,
-    lm_logs_verbose=LM_LOGS_VERBOSE,
-)
+
+def bootstrap() -> None:
+    """Configure stderr and optional LM Logs handlers once at startup."""
+    global _bootstrapped, logger
+    if _bootstrapped:
+        return
+
+    from edwin_elastic_poller.observability import lm_logs
+
+    suppress_insecure_request_warnings()
+    logger = lm_logs.configure_logging(
+        debug=DEBUG,
+        log_enabled=LOG_ENABLED,
+        lm_logs_enabled=LM_LOGS_ENABLED,
+        lm_logs_account=LM_LOGS_ACCOUNT,
+        lm_logs_bearer_token=LM_LOGS_BEARER_TOKEN,
+        lm_logs_resource_id=LM_LOGS_RESOURCE_ID,
+        lm_logs_verbose=LM_LOGS_VERBOSE,
+    )
+    _bootstrapped = True

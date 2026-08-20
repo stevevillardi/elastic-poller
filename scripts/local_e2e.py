@@ -34,9 +34,7 @@ if str(REPO_ROOT) not in sys.path:
 
 from dotenv import load_dotenv
 
-import elastic_poller
-from elastic_poller import bookmark, config, delivery
-from tests import es_test_support
+from edwin_elastic_poller import bookmark, config, delivery, elasticsearch, poller
 
 load_dotenv(REPO_ROOT / ".env")
 
@@ -117,6 +115,9 @@ def main() -> int:
             )
             return 1
 
+    from tests import es_test_support
+
+    config.bootstrap()
     es_url = args.es_url.rstrip("/")
     index = f"poller-e2e-{uuid.uuid4().hex[:8]}"
     base_time = es_test_support.current_base_time()
@@ -133,7 +134,6 @@ def main() -> int:
     es_test_support.create_test_index(index, shards=3, es_url=es_url)
 
     temp_dir = tempfile.TemporaryDirectory()
-    bookmark_file = os.path.join(temp_dir.name, "e2e.elastic.bookmark")
 
     config.ELASTIC_URL = es_url
     config.ELASTIC_INDEX = index
@@ -144,9 +144,9 @@ def main() -> int:
     config.ELASTIC_PASS = None
     config.ELASTIC_TOKEN = None
     config.ELASTIC_PIT_KEEP_ALIVE = "2m"
-    bookmark.bookmark_dir = temp_dir.name
-    bookmark.bookmark_file = bookmark_file
-    elastic_poller.setBookmark(0)
+    config.BOOKMARK_PATH = temp_dir.name
+    config.EDWIN_ORG = "e2e"
+    bookmark.set_bookmark(0)
 
     collector = None
     if not args.live:
@@ -154,7 +154,7 @@ def main() -> int:
         delivery.send_event = collector
 
     expected_ids: set[str] = set()
-    bookmark = 0
+    bookmark_ms = 0
     bookmark_loaded = False
     watermark = 0
 
@@ -170,11 +170,11 @@ def main() -> int:
             expected_ids |= wave_ids
             print(f"  indexed {len(wave_ids)} documents")
 
-            bookmark = elastic_poller.poll_cycle(bookmark, watermark, bookmark_loaded)
+            bookmark_ms = poller.poll_cycle(bookmark_ms, watermark, bookmark_loaded)
             bookmark_loaded = True
             print(
-                f"  bookmark now {bookmark} "
-                f"({elastic_poller.epoch_ms_to_zulu(bookmark)})"
+                f"  bookmark now {bookmark_ms} "
+                f"({elasticsearch.epoch_ms_to_zulu(bookmark_ms)})"
             )
 
             if collector is not None:

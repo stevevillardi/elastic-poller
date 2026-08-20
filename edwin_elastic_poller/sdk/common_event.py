@@ -18,7 +18,7 @@ import pydantic
 import pydantic.validators
 import yaml
 
-_logger = logging.getLogger("elastic_poller.common_event")
+_logger = logging.getLogger("edwin_elastic_poller.sdk.common_event")
 
 class StrEnum(str, enum.Enum):
     """Used to create StrEnum class for compatibility with Python 3.9."""

@@ -18,22 +18,9 @@ import pydantic
 import requests
 import yaml
 
-_logger = logging.getLogger("elastic_poller.edwin_request")
+from edwin_elastic_poller import config
 
-
-def _verify_ssl() -> bool:
-    """Return whether Edwin HTTPS requests should verify certificates."""
-    verify = os.getenv("EDWIN_VERIFY_SSL", "true").lower() in (
-        "1",
-        "true",
-        "yes",
-        "on",
-    )
-    if not verify:
-        requests.packages.urllib3.disable_warnings(
-            requests.packages.urllib3.exceptions.InsecureRequestWarning
-        )
-    return verify
+_logger = logging.getLogger("edwin_elastic_poller.sdk.edwin_request")
 
 
 def _normalize_auth_dict(auth_dict: dict[str, str]) -> dict[str, str]:
@@ -101,7 +88,7 @@ class EdwinRequest:
     def new_from_env(cls) -> "EdwinRequest":
         """Start a new EdwinRequest using environment variables."""
         dotenv.load_dotenv()
-        from elastic_poller.config import (
+        from edwin_elastic_poller.config import (
             edwin_client_id,
             edwin_client_token,
             edwin_org,
@@ -150,7 +137,7 @@ class EdwinRequest:
                     "Accept": "application/json",
                 },
                 timeout=30,
-                verify=_verify_ssl(),
+                verify=config.EDWIN_VERIFY_SSL,
             )
             response.raise_for_status()
             if response.status_code != 200:
@@ -220,7 +207,7 @@ class EdwinRequest:
                         data=json.dumps(batch),
                         headers=headers,
                         timeout=360,
-                        verify=_verify_ssl(),
+                        verify=config.EDWIN_VERIFY_SSL,
                     )
                     response.raise_for_status()
                     _logger.info(

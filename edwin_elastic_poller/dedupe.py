@@ -6,12 +6,8 @@ import os
 import sqlite3
 from typing import Iterable, Optional
 
-from elastic_poller import config
-
-
-def _database_path() -> str:
-    directory = config.BOOKMARK_PATH.rstrip("/") if config.BOOKMARK_PATH else "."
-    return os.path.join(directory, f"{config.EDWIN_ORG}.elastic.dedupe.sqlite")
+from edwin_elastic_poller import config
+from edwin_elastic_poller import storage_paths
 
 
 def document_key(hit: dict) -> Optional[str]:
@@ -24,7 +20,7 @@ def document_key(hit: dict) -> Optional[str]:
 
 
 def _connect() -> sqlite3.Connection:
-    path = _database_path()
+    path = storage_paths.dedupe_db_path()
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     connection = sqlite3.connect(path)
     connection.execute(
@@ -85,7 +81,7 @@ def maintain(before_timestamp_ms: int) -> int:
     records are removed. This can permit a duplicate delivery, but avoids
     unbounded disk growth and preserves forward progress.
     """
-    database_path = _database_path()
+    database_path = storage_paths.dedupe_db_path()
     evicted = 0
     connection = _connect()
     try:

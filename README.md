@@ -2,13 +2,13 @@
 
 The **Edwin Event Integration** connects your Elasticsearch Kibana alerting event log to **Edwin**. It continuously polls Elasticsearch for new events, maps them to Common Event Format (CEF), and delivers them to Edwin over HTTPS—with durable bookmarking so events are processed once and large backlogs drain safely across poll cycles.
 
-This repository ships the integration as the `elastic-poller` service (Docker image and Python package). The commands and file names below use that technical name; in documentation and operations, refer to the product as **Edwin Event Integration**.
+This repository ships the integration as the `edwin-elastic-poller` service (Docker image and Python package). The commands and file names below use that technical name; in documentation and operations, refer to the product as **Edwin Event Integration**.
 
 ## What it does
 
 1. Opens a point-in-time (PIT) search against your Elasticsearch event-log index.
 2. Fetches documents newer than the stored bookmark, in pages of `ELASTIC_BATCH_SIZE`.
-3. Maps each document to CEF using `elastic_event_mappings.yaml`.
+3. Maps each document to CEF using the bundled mapping in `edwin_elastic_poller/mappings/`.
 4. Delivers batches to Edwin over HTTPS.
 5. Advances the bookmark only after Edwin accepts a batch.
 6. Sleeps for `POLLER_INTERVAL` seconds, then repeats.
@@ -26,6 +26,28 @@ On first run (no bookmark file, or bookmark is `0`), the integration starts poll
 
 The integration reads the **Kibana event log**, not raw log or Beats indices.
 
+## Quick start (pip)
+
+Install the latest release from PyPI:
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install edwin-elastic-poller
+
+cp .env.example .env
+# edit .env with your credentials
+
+edwin-elastic-poller
+# or: python -m edwin_elastic_poller
+```
+
+Pre-releases are published to [TestPyPI](https://test.pypi.org/project/edwin-elastic-poller/) first. To try a candidate build:
+
+```bash
+pip install --index-url https://test.pypi.org/simple/ --extra-index-url https://pypi.org/simple/ edwin-elastic-poller
+```
+
 ## Quick start (Docker)
 
 ### 1. Configure environment
@@ -42,7 +64,7 @@ At minimum, set Edwin credentials and Elasticsearch connection details (see [Con
 ### 2. Build the image
 
 ```bash
-docker build -t elastic-poller .
+docker build -t edwin-elastic-poller .
 ```
 
 ### 3. Run the container
@@ -51,11 +73,11 @@ Mount a volume for the bookmark so progress survives restarts:
 
 ```bash
 docker run -d \
-  --name elastic-poller \
+  --name edwin-elastic-poller \
   --restart unless-stopped \
   --env-file .env \
-  -v elastic-poller-data:/data \
-  elastic-poller
+  -v edwin-elastic-poller-data:/data \
+  edwin-elastic-poller
 ```
 
 The default bookmark path inside the container is `/data/{EDWIN_ORG}.elastic.bookmark`.
@@ -65,30 +87,32 @@ The default bookmark path inside the container is `/data/{EDWIN_ORG}.elastic.boo
 Check container logs for startup and poll-cycle summaries:
 
 ```bash
-docker logs -f elastic-poller
+docker logs -f edwin-elastic-poller
 ```
 
 You should see lines like:
 
 ```text
-INFO - elastic-poller started
+INFO - edwin-elastic-poller started
 INFO - Poll cycle finished: status=complete, events_delivered=12, pages_fetched=1, ...
 ```
 
-## Quick start (Python)
+## Quick start (development)
+
+For local development from a git checkout:
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -r requirements.txt
+pip install -e .
 
 cp .env.example .env
 # edit .env with your credentials
 
-python -m elastic_poller
+python -m edwin_elastic_poller
 ```
 
-Run from the **repository root** so `elastic_event_mappings.yaml` resolves correctly.
+Dependencies are declared in `pyproject.toml` only. Run from the repository root or any directory after installing the package.
 
 ## Configuration
 
@@ -115,7 +139,9 @@ Legacy aliases `DEXDA_ORG`, `DEXDA_ID`, and `DEXDA_TOKEN` are still accepted if 
 | `ELASTIC_PASS` | No* | — | Basic auth password |
 | `ELASTIC_TOKEN` | No* | — | API key (alternative to user/password) |
 | `ELASTIC_QUERY` | No | `*` | Lucene `query_string` filter applied in addition to the bookmark range |
-| `ELASTIC_VERIFY_SSL` | No | `true` | Set `false` only for controlled test environments |
+| `VERIFY_SSL` | No | `true` | TLS verification for all outbound HTTPS (Elasticsearch, Edwin, LM Logs). Set `false` only in controlled test environments |
+| `ELASTIC_VERIFY_SSL` | No | — | Deprecated; use `VERIFY_SSL`. Honored only when `VERIFY_SSL` is unset |
+| `EDWIN_VERIFY_SSL` | No | — | Deprecated; use `VERIFY_SSL`. Honored only when `VERIFY_SSL` is unset |
 | `ELASTIC_PIT_KEEP_ALIVE` | No | `5m` | Point-in-time lease per poll cycle (extended on each page) |
 | `ELASTIC_OVERLAP_MS` | No | `300000` | History reread window for delayed events; delivered documents are deduplicated |
 | `DEDUPE_MAX_RECORDS` | No | `250000` | Maximum retained document identities |
@@ -184,16 +210,25 @@ payload inspection is required.
 
 ## Event mapping
 
-Documents are converted to CEF using `elastic_event_mappings.yaml` in the repository root. JSONPath expressions map Elasticsearch fields to CEF attributes (CI, severity, event ID, and so on).
+Documents are converted to CEF using the bundled mapping file at `edwin_elastic_poller/mappings/elastic_event_mappings.yaml`. JSONPath expressions map Elasticsearch fields to CEF attributes (CI, severity, event ID, and so on).
 
-To customize mapping for your environment, edit that file and restart the integration. Field mappings follow the Common Event schema used by Edwin.
+To customize mapping for your environment, either:
+
+- Set `EVENT_MAPPING_FILE` to the path of your YAML file (absolute or relative to the process working directory), or
+- Edit the bundled file in a development checkout and restart the integration.
+
+Field mappings follow the Common Event schema used by Edwin.
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `EVENT_MAPPING_FILE` | No | Path to a custom mapping YAML; when unset, the bundled default is used |
 
 ## How it works
 
 ```text
 ┌─────────────┐     PIT search      ┌────────────────────────┐     CEF batches     ┌───────┐
 │ Elasticsearch│ ─────────────────► │ Edwin Event Integration │ ──────────────────► │ Edwin │
-│ (event log)  │ ◄── bookmark gt ── │ (elastic-poller)        │                     └───────┘
+│ (event log)  │ ◄── bookmark gt ── │ (edwin-elastic-poller)        │                     └───────┘
 └─────────────┘                     └───────────┬────────────┘
                                                 │
                                          bookmark file
@@ -241,17 +276,17 @@ Monitor for:
 | No events delivered | `ELASTIC_INDEXS` points at the Kibana event log; `ELASTIC_QUERY` is not too restrictive; bookmark is not ahead of available data |
 | Bookmark never advances | Edwin credentials; network egress to `{EDWIN_ORG}.dexda.ai`; container logs for `delivery_failed` |
 | `pit_expired` in logs | Slow cycles or large backlogs — increase `ELASTIC_PIT_KEEP_ALIVE` |
-| SSL errors to Elasticsearch | `ELASTIC_VERIFY_SSL=true` and valid CA trust, or correct URL |
-| Empty `./data` after tests | Unit and integration tests use temporary bookmark paths; only `python -m elastic_poller` or Docker with a mounted volume writes the production bookmark |
+| `pit_open_failed` / `Connection refused` to `localhost:9200` | Containerized poller cannot reach ES at `localhost` — use `host.docker.internal`, a Compose service name, or the remote ES hostname (see [Docker quick start](#quick-start-docker)) |
+| Empty `./data` after tests | Unit and integration tests use temporary bookmark paths; only `python -m edwin_elastic_poller` or Docker with a mounted volume writes the production bookmark |
 | Mapping warnings in DEBUG | Expected fallback behavior when optional JSONPath fields are missing; operational impact is none if events reach Edwin |
 
 ## Development
 
-For maintainers — local testing, CI, and implementation details — see [CONTRIBUTING.md](CONTRIBUTING.md).
+For maintainers — local testing, CI, releases, and implementation details — see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Disposable Kibana integration stack
 
-Start Elasticsearch, Kibana, a real `.es-query` Kibana rule, and one test
+Start Elasticsearch, Kibana, six real `.es-query` Kibana rules, and one test
 document with:
 
 ```bash
@@ -259,9 +294,9 @@ docker compose -f docker-compose.kibana-test.yml up
 ```
 
 The stack exposes Elasticsearch at `http://localhost:9200` and Kibana at
-`http://localhost:5601`. The setup container creates the test rule and deletes
-it when the stack is stopped. Elasticsearch and Kibana data are disposable
-because no volumes are configured.
+`http://localhost:5601`. The setup container creates active, non-matching, and
+threshold-variation rules, then deletes them when the stack is stopped.
+Elasticsearch and Kibana data are disposable because no volumes are configured.
 
 Stop and tear down everything with:
 
@@ -269,10 +304,14 @@ Stop and tear down everything with:
 docker compose -f docker-compose.kibana-test.yml down --volumes --remove-orphans
 ```
 
-Point a local poller at the generated event log with
+Point a **host-run** poller at the generated event log with
 `ELASTIC_INDEXS=.kibana-event-log-ds`, `ELASTIC_QUERY=*`, and
-`ELASTIC_URL=http://localhost:9200`. This stack does not configure Edwin
-delivery; use a test credential set only when delivery is intentionally
+`ELASTIC_URL=http://localhost:9200`.
+
+If the poller runs **in Docker** while this stack is up, use
+`ELASTIC_URL=http://host.docker.internal:9200` (Docker Desktop) or attach the
+poller to the Compose network with `ELASTIC_URL=http://elasticsearch:9200`.
+This stack does not configure Edwin delivery; use a test credential set only when delivery is intentionally
 required.
 
 ## License
